@@ -6,8 +6,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const path = require("path");
 const cors = require("cors");
-const dotenv = require("dotenv").config()
-
+const dotenv = require("dotenv").config();
 
 app.use(express.json());
 app.use(cors());
@@ -113,6 +112,153 @@ app.get("/allproducts", async (req, res) => {
   let products = await Product.find();
   console.log("All products fetched");
   res.send(products);
+});
+
+// Users model
+
+const Users = mongoose.model("Users", {
+  name: { type: String },
+  email: { type: String, unique: true },
+  password: { type: String },
+  cartData: {
+    type: Object,
+  },
+  date: {
+    type: Date,
+    dafault: Date.now,
+  },
+});
+
+app.post("/signup", async (req, res) => {
+  let check = await Users.findOne({ email: req.body.email });
+  if (check) {
+    return res.status(400).json({
+      success: false,
+      errors: "existing user found with same email address",
+    });
+  }
+  if (
+    req.body.username === "" ||
+    req.body.email === "" ||
+    req.body.password === ""
+  ) {
+    return res.status(400).json({
+      success: false,
+      errors: "input field should not be empty",
+    });
+  }
+  let cart = {};
+  for (let index = 0; index < 300; index++) {
+    cart[index] = 0;
+  }
+  const user = new Users({
+    name: req.body.username,
+    email: req.body.email,
+    password: req.body.password,
+    cartData: cart,
+  });
+
+  await user.save();
+
+  const data = {
+    user: {
+      id: user.id,
+    },
+  };
+
+  const token = jwt.sign(data, "secret_ecom");
+  res.json({ success: true, token });
+});
+
+app.post("/login", async (req, res) => {
+  if (req.body.email === "" || req.body.password === "") {
+    return res.status(400).json({
+      success: false,
+      errors: "input field should not be empty",
+    });
+  }
+  let user = await Users.findOne({ email: req.body.email });
+  if (user) {
+    const passCompare = req.body.password === user.password;
+    if (passCompare) {
+      const data = {
+        user: {
+          id: user.id,
+        },
+      };
+      const token = jwt.sign(data, "secret_ecom");
+
+      res.json({ success: true, token });
+    } else {
+      res.json({ success: false, errors: "wrong password" });
+    }
+  } else {
+    res.json({ success: false, errors: "user not found" });
+  }
+});
+
+app.get("/newcollections", async (req, res) => {
+  let products = await Product.find();
+  let newcollection = products.splice(1).slice(-8);
+  console.log("Newcollection fetched");
+  res.send(newcollection);
+});
+
+app.get("/popularinwomen", async (req, res) => {
+  let products = await Product.find({ category: "women" });
+  let popular_in_women = products.slice(0, 4);
+  console.log("Popular in women fetched");
+  res.send(popular_in_women);
+});
+
+const fetchUser = async (req, res, next) => {
+  const token = req.header("auth-token");
+  if (!token) {
+    res.status(401).send({ errors: "Please authenticate using valid token" });
+  } else {
+    try {
+      const data = jwt.verify(token, "secret_ecom");
+      req.user = data.user;
+      next();
+    } catch (error) {
+      console.log(error);
+      res.status(401).send({ errors: "Please authenticate using valid token" });
+    }
+  }
+};
+
+app.post("/addtocart", fetchUser, async (req, res) => {
+  console.log("added", req.body.itemId);
+  let userData = await Users.findOne({ _id: req.user.id });
+
+  userData.cartData[req.body.itemId] += 1;
+  await Users.findOneAndUpdate(
+    { _id: req.user.id },
+    { cartData: userData.cartData }
+  );
+  res.send("Added");
+});
+
+app.post("/removefromcart", fetchUser, async (req, res) => {
+  console.log("removed", req.body.itemId);
+  let userData = await Users.findOne({ _id: req.user.id });
+
+  if (userData.cartData[req.body.itemId] > 0) {
+    userData.cartData[req.body.itemId] -= 1;
+  }
+
+  await Users.findOneAndUpdate(
+    { _id: req.user.id },
+    { cartData: userData.cartData }
+  );
+  res.send("Removed");
+});
+
+app.post("/getcart", fetchUser, async (req, res) => {
+  console.log("get cart");
+  let userData = await Users.findOne({ _id: req.user.id });
+
+  res.send(userData.cartData);
 });
 
 app.listen(port, (error) => {
